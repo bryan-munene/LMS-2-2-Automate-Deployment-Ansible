@@ -1,0 +1,4 @@
+.env
+packer/vars.json
+scripts/baseConfig.retry
+.DS_Store
