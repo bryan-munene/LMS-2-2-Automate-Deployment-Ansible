@@ -6,119 +6,74 @@
   become: yes
   become_method: sudo
   vars:
-    nodejs_version: "10"
-    ansible_dest_release: "trusty"
+    db_user: <<YOUR DATABASE USER>>
+    db_name: <<YOUR DATABASE NAME>>
+    db_password: <<YOUR DATABASE PASSWORD>>
     ansible_python_interpreter: "/usr/bin/python3"
 
   tasks:
 
   # INSTALL PACKAGES
 
-  - name: Install gpg key for node js
-    apt_key:
-      url: "https://deb.nodesource.com/gpgkey/nodesource.gpg.key"
-      state: present
-
-  - name: Add nodejs repo
-    apt_repository:
-      repo: "deb https://deb.nodesource.com/node_{{ nodejs_version }}.x {{ ansible_dest_release }} main"
-      state: present
+  - name: Installing python 3.7
+    apt:
+      name: python3.7
       update_cache: yes
-
-  - name: install nginx
+      state: present
+  
+  - name: Installing python3-pip
     apt:
-      name: nginx
-      state: latest
-
-  - name: install nodejs
-    apt:
-      name: nodejs
+      name: python3-pip
       state: present
 
-  - name: Install PM2
-    npm:
-      name: pm2
+  - name: Ensure bash, OpenSSl, and libssl are the latest versions
+    apt: 
+      name: [bash, openssl, libssl-dev, libssl-doc]
+      update_cache: true 
       state: latest
-      global: yes
-
-  - name: Change ownership of various directories
-    file: 
-      path: "{{ item }}"
-      owner: ubuntu
-      recurse: yes
-    with_items:
-      - /etc/nginx/sites-available
-      - ~/.config 
-      - ~/.npm
-
   
-  # CLONE THE REPO AND CD TO IT
-
-  - name: clone the repo
-    git:
-      repo: 'https://github.com/andela/ah-bird-box-frontend.git'
-      dest: /home/ubuntu/ah-bird-box-frontend
-      clone: yes
-
-  # INSTALL DEPENDENCIES AND ADD ENV VARIABLES
-
-  - name: Change ownership of project directory
-    file: 
-      path: /home/ubuntu/ah-bird-box-frontend
-      owner: ubuntu
-      recurse: yes
-
-  - name: Install dependancies
+  - name: Install PostgreSQL
+    apt: 
+      name: [postgresql, postgresql-contrib, libpq-dev]
+      update_cache: true 
+      state: present
+    
+  - name: Install psycopg2
     shell:
       cmd: |
-        cd /home/ubuntu/ah-bird-box-frontend
-        sudo npm install --no-optional
+        pip3 install psycopg2
         
-  - name: Change ownership of project directory
-    file: 
-      path: /home/ubuntu/ah-bird-box-frontend
-      owner: ubuntu
-      recurse: yes
+  - name: Ensure the PostgreSQL service is running
+    service: 
+      name: postgresql 
+      state: started 
+      enabled: yes
+
+  - name: Ensure database is created
+    become_user: postgres
+    postgresql_db: 
+      name={{ db_name }}
+      encoding='UTF-8'
+      lc_collate='en_US.UTF-8'
+      lc_ctype='en_US.UTF-8'
+      template='template0'
+      state=present
+
+  - name: Ensure user has access to the database
+    sudo_user: postgres
+    postgresql_user: 
+      db={{ db_name }}
+      name={{ db_user }}
+      password={{ db_password }}
+      priv=ALL
+      state=present
   
-  # CONFIGURE NGINX
-
-  - name: Remove NGINX default files
-    file: 
-      path: "{{ item }}"
-      state: absent
-    with_items:
-      - /etc/nginx/sites-enabled/default
-      - /etc/nginx/sites-available/default
-
-
-  - name: Check if custom file already exists and delete if found
-    file: 
-      path: /etc/nginx/sites-available/ansibleDemo
-      state: absent
-
-  - name: Add custom nginx configuration
-    shell:
-      cmd: |
-          cat > /etc/nginx/sites-available/ansibleDemo <<EOF
-          server {
-              listen 80;
-              server_name localhost;
-              location / {
-                proxy_pass http://127.0.0.1:3000;
-              }
-          }
-          EOF
-
-  - name: create symlinks for nginx configuration 
-    file:
-      src:  /etc/nginx/sites-available/ansibleDemo
-      dest: /etc/nginx/sites-enabled/ansibleDemo
-      state: link
-    notify:
-    - restart nginx
+  - name: Edit postgresql.conf file
+    shell: |
+        sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/gi" /etc/postgresql/10/main/postgresql.conf
+        systemctl restart postgresql
   
-  handlers:
-    - name: restart nginx
-      service: 
-        name: nginx
-        state: restarted
+  - name: Edit pg_hba.conf file
+    shell: |
+        echo "host  all  all  172.16.2.0/24  trust" >> /etc/postgresql/10/main/pg_hba.conf
+        systemctl restart postgresql
