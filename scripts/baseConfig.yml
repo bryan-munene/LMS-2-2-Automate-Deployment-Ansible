@@ -6,7 +6,6 @@
   become: yes
   become_method: sudo
   vars:
-    nodejs_version: "10"
     ansible_dest_release: "trusty"
     ansible_python_interpreter: "/usr/bin/python3"
 
@@ -14,33 +13,43 @@
 
   # INSTALL PACKAGES
 
-  - name: Install gpg key for node js
-    apt_key:
-      url: "https://deb.nodesource.com/gpgkey/nodesource.gpg.key"
-      state: present
-
-  - name: Add nodejs repo
-    apt_repository:
-      repo: "deb https://deb.nodesource.com/node_{{ nodejs_version }}.x {{ ansible_dest_release }} main"
-      state: present
+  - name: Installing python 3.7
+    apt:
+      name: python3.7
       update_cache: yes
-
-  - name: install nginx
-    apt:
-      name: nginx
-      state: latest
-
-  - name: install nodejs
-    apt:
-      name: nodejs
       state: present
+  
+  - name: Installing python-virtualenv python3-pip nginx python3.7-gdbm
+    apt:
+      name: [python-virtualenv, python3-pip, nginx, python3.7-gdbm]
+      state: present
+    
+  - name: use python 3.7
+    shell: 
+      cmd: |
+        sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1
+        sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.7 10
+  
+  # CLONE THE REPO
 
-  - name: Install PM2
-    npm:
-      name: pm2
-      state: latest
-      global: yes
+  - name: clone the repo
+    git:
+      repo: 'https://github.com/andela/ah-bird-box.git'
+      dest: /home/ubuntu/ah-bird-box
+      clone: yes
 
+  # CREATE VIRTUAL ENVIROMENT AND INSTALL DEPENDNCIES
+
+  - name: Add a python virtaul enviroment and activate it
+    shell: 
+      cmd: |
+        cd /home/ubuntu/ah-bird-box
+        virtualenv --python=/usr/bin/python3.7 venv
+        source venv/bin/activate
+        pip3 install -r requirements.txt
+
+  # CONFIGURE NGINX
+  
   - name: Change ownership of various directories
     file: 
       path: "{{ item }}"
@@ -48,40 +57,7 @@
       recurse: yes
     with_items:
       - /etc/nginx/sites-available
-      - ~/.config 
-      - ~/.npm
-
-  
-  # CLONE THE REPO AND CD TO IT
-
-  - name: clone the repo
-    git:
-      repo: 'https://github.com/andela/ah-bird-box-frontend.git'
-      dest: /home/ubuntu/ah-bird-box-frontend
-      clone: yes
-
-  # INSTALL DEPENDENCIES AND ADD ENV VARIABLES
-
-  - name: Change ownership of project directory
-    file: 
-      path: /home/ubuntu/ah-bird-box-frontend
-      owner: ubuntu
-      recurse: yes
-
-  - name: Install dependancies
-    shell:
-      cmd: |
-        cd /home/ubuntu/ah-bird-box-frontend
-        sudo npm install --no-optional
-        
-  - name: Change ownership of project directory
-    file: 
-      path: /home/ubuntu/ah-bird-box-frontend
-      owner: ubuntu
-      recurse: yes
-  
-  # CONFIGURE NGINX
-
+      
   - name: Remove NGINX default files
     file: 
       path: "{{ item }}"
@@ -89,7 +65,6 @@
     with_items:
       - /etc/nginx/sites-enabled/default
       - /etc/nginx/sites-available/default
-
 
   - name: Check if custom file already exists and delete if found
     file: 
@@ -104,9 +79,10 @@
               listen 80;
               server_name localhost;
               location / {
-                proxy_pass http://127.0.0.1:3000;
+                proxy_pass http://127.0.0.1:8000;
               }
           }
+
           EOF
 
   - name: create symlinks for nginx configuration 
@@ -116,6 +92,78 @@
       state: link
     notify:
     - restart nginx
+
+  # CONFIGURE APP TO RUN
+
+  - name: Create start script
+    shell: 
+      cmd: |
+        cd /home/ubuntu/ah-bird-box
+        touch startapp.sh
+
+        cat > startapp.sh <<EOF
+        #!/usr/bin/env bash
+        cd /home/ubuntu/
+        ls -al
+        export DATABASE_URL="postgres://wiczscmcoywrfo:38a69f136463d5be96a7a7e4c4f83b7515e288ae04553224426be21ffa4b87a9@ec2-184-73-153-64.compute-1.amazonaws.com:5432/d6r00h5tof1r6l"
+        export SECRET_KEY="7pgozr2jn7zskjna89ya8ydj"
+        export FACEBOOK_KEY="247837426149873"
+        export FACEBOOK_SECRET="2e84a49d93c22149d8fc0a9ca4b637e8"
+        export GOOGLE_OAUTH2_KEY="1002458434953-pacsegk23bhcmuqso0obfk6h0g72ma76.apps.googleusercontent.com"
+        export GOOGLE_OAUTH2_SECRET="UHFx0lVYiHWAEz-Rm0aU_DpN"
+        export OAUTH2_ACCESS_TOKEN="EAADhaCWZCafEBAFUJbrqpS3BqZAVah0YZCNGi7GXdzEPLdkhT7yYfx32Ayt0NTPbhQ3ykTUhGCtAw1pNIPsKLBgvlj1N3KyhElXZByP0jntknsVmMHWdCdXzFTAFtGeUtMSCVVKEBVLU1DrXZBzNTYWeGQ8idofwZD"
+        export EMAIL_SENDER="ahbirdbox03@gmail.com"
+        export EMAIL_HOST="smtp.gmail.com"
+        export EMAIL_HOST_USER="ahbirdbox03@gmail.com"
+        export EMAIL_HOST_PASSWORD="@Birdbox2019"
+        export EMAIL_PORT=587
+        export CLOUDINARY_NAME="muthuri"
+        export CLOUDINARY_KEY="873127371616125"
+        export CLOUDINARY_SECRET="XjqUIFkfYmu2GBjgY041EZcg_-8"
+        export APP_BASE_URL="http://127.0.0.1:8000"
+
+        cd ah-bird-box/
+
+        source venv/bin/activate
+
+        gunicorn authors.wsgi
+
+
+        EOF
+
+  - name: Create start service
+    shell: 
+      cmd: |
+        cd /etc/systemd/system/
+        touch ahbb.service
+        cat > ahbb.service <<EOF
+        
+        [Unit]
+        Description=AH Birdbox startup service
+        After=network.target
+
+        [Service]
+        User=ubuntu
+        ExecStart=/bin/bash /home/ubuntu/ah-bird-box/startapp.sh
+        Restart=always
+
+        [Install]
+        WantedBy=multi-user.target
+
+        EOF
+  
+  - name: Change the files permission
+    shell: 
+      cmd: |
+        sudo chmod 744 /home/ubuntu/ah-bird-box/startapp.sh
+        sudo chmod 664 /etc/systemd/system/ahbb.service
+
+  - name: Start the service that keeps the app running
+    shell: 
+      cmd: |
+        sudo systemctl daemon-reload
+        sudo systemctl enable ahbb.service
+        sudo systemctl start ahbb.service
   
   handlers:
     - name: restart nginx

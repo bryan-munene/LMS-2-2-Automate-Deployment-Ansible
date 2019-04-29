@@ -25,7 +25,7 @@
         },
         "instance_type": "{{user `instance_type`}}",
         "ssh_username": "{{user `ssh_username`}}",
-        "ami_name": "ah-birdbox-frontend {{timestamp}}"
+        "ami_name": "ah-birdbox-backend test {{timestamp}}"
       }
     ],
     "provisioners": [
@@ -37,11 +37,6 @@
       {
         "type": "ansible",
         "playbook_file": "../scripts/baseConfig.yml"
-      },
-
-      {
-        "type": "shell",
-        "script": "../scripts/start.sh"
       }
     ]
   }
