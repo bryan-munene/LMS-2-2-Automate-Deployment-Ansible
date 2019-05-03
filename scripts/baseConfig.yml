@@ -6,12 +6,17 @@
   become: yes
   become_method: sudo
   vars:
-    ansible_dest_release: "trusty"
     ansible_python_interpreter: "/usr/bin/python3"
 
   tasks:
 
   # INSTALL PACKAGES
+
+  - name: Adding python 3.7 repository
+    apt_repository:
+      repo: ppa:deadsnakes/ppa
+      update_cache: yes
+      state: present
 
   - name: Installing python 3.7
     apt:
@@ -24,12 +29,6 @@
       name: [python-virtualenv, python3-pip, nginx, python3.7-gdbm]
       state: present
     
-  - name: use python 3.7
-    shell: 
-      cmd: |
-        sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.6 1
-        sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.7 10
-  
   # CLONE THE REPO
 
   - name: clone the repo
@@ -95,6 +94,34 @@
 
   # CONFIGURE APP TO RUN
 
+  - name: Create enviroment variables script
+    shell: 
+      cmd: |
+        cd /home/ubuntu/ah-bird-box
+        touch .env
+
+        cat > .env <<EOF
+        source venv/bin/activate
+
+        export DATABASE_URL="postgresql://YOUR_ROLE:PASSWORD@localhost:5432/DB_NAME"
+        export SECRET_KEY='YOUR SECRET KEY GOES HERE'
+        export FACEBOOK_KEY="FACEBOOK KEY HERE"
+        export FACEBOOK_SECRET="FACEBOOK SECRET HERE"
+        export GOOGLE_OAUTH2_KEY="GOOGLE OAUTH2 KEY HERE"
+        export GOOGLE_OAUTH2_SECRET="GOOGLE OAUTH2 SECRET HERE"
+        export OAUTH2_ACCESS_TOKEN="GOOGLE OAUTH2 ACCESS TOKEN HERE"
+        export EMAIL_SENDER="YOUR EMAIL ADDRESS"
+        export EMAIL_HOST="smtp.gmail.com"
+        export EMAIL_HOST_USER="YOUR EMAIL ADDRESS"
+        export EMAIL_HOST_PASSWORD="YOUR PASSWORD"
+        export EMAIL_PORT=587
+        export CLOUDINARY_NAME=“CLOUDINARY NAME”
+        export CLOUDINARY_KEY=“CLOUDINARY API KEY"
+        export CLOUDINARY_SECRET=“CLOUDINARY API SECRET KEY”
+        export APP_BASE_URL="http://127.0.0.1:8000"
+
+        EOF
+
   - name: Create start script
     shell: 
       cmd: |
@@ -103,31 +130,12 @@
 
         cat > startapp.sh <<EOF
         #!/usr/bin/env bash
-        cd /home/ubuntu/
+        cd /home/ubuntu/ah-bird-box/
         ls -al
-        export DATABASE_URL="postgres://wiczscmcoywrfo:38a69f136463d5be96a7a7e4c4f83b7515e288ae04553224426be21ffa4b87a9@ec2-184-73-153-64.compute-1.amazonaws.com:5432/d6r00h5tof1r6l"
-        export SECRET_KEY="7pgozr2jn7zskjna89ya8ydj"
-        export FACEBOOK_KEY="247837426149873"
-        export FACEBOOK_SECRET="2e84a49d93c22149d8fc0a9ca4b637e8"
-        export GOOGLE_OAUTH2_KEY="1002458434953-pacsegk23bhcmuqso0obfk6h0g72ma76.apps.googleusercontent.com"
-        export GOOGLE_OAUTH2_SECRET="UHFx0lVYiHWAEz-Rm0aU_DpN"
-        export OAUTH2_ACCESS_TOKEN="EAADhaCWZCafEBAFUJbrqpS3BqZAVah0YZCNGi7GXdzEPLdkhT7yYfx32Ayt0NTPbhQ3ykTUhGCtAw1pNIPsKLBgvlj1N3KyhElXZByP0jntknsVmMHWdCdXzFTAFtGeUtMSCVVKEBVLU1DrXZBzNTYWeGQ8idofwZD"
-        export EMAIL_SENDER="ahbirdbox03@gmail.com"
-        export EMAIL_HOST="smtp.gmail.com"
-        export EMAIL_HOST_USER="ahbirdbox03@gmail.com"
-        export EMAIL_HOST_PASSWORD="@Birdbox2019"
-        export EMAIL_PORT=587
-        export CLOUDINARY_NAME="muthuri"
-        export CLOUDINARY_KEY="873127371616125"
-        export CLOUDINARY_SECRET="XjqUIFkfYmu2GBjgY041EZcg_-8"
-        export APP_BASE_URL="http://127.0.0.1:8000"
-
-        cd ah-bird-box/
-
-        source venv/bin/activate
+        
+        source .env
 
         gunicorn authors.wsgi
-
 
         EOF
 
@@ -141,9 +149,13 @@
         [Unit]
         Description=AH Birdbox startup service
         After=network.target
+        After=systemd-user-sessions.service
+        After=network-online.target
 
         [Service]
+        Type=simple
         User=ubuntu
+        WorkingDirectory=/home/ubuntu/ah-bird-box
         ExecStart=/bin/bash /home/ubuntu/ah-bird-box/startapp.sh
         Restart=always
 
@@ -157,7 +169,7 @@
       cmd: |
         sudo chmod 744 /home/ubuntu/ah-bird-box/startapp.sh
         sudo chmod 664 /etc/systemd/system/ahbb.service
-
+        
   - name: Start the service that keeps the app running
     shell: 
       cmd: |
